@@ -1,36 +1,38 @@
 # ccx
 
-**Claude Code Exchange** — an OAuth reverse proxy that lets multiple devices share a single Claude Code subscription.
+**Claude Code Exchange** — 一个 OAuth 反向代理，让多台设备共享一个 Claude Code 订阅。
+
+[English](./docs/en/README.md)
 
 ```
 Device A (claude code) ──┐
 Device B (claude code) ──┼──→ ccx ──→ api.anthropic.com
-Device C (headless)    ──┘   (token management
-                              + auto-refresh)
+Device C (headless)    ──┘   (token 管理
+                              + 自动刷新)
 ```
 
-## What it does
+## 功能
 
-- Holds OAuth tokens centrally on one machine
-- Auto-refreshes tokens before expiry (or on 401)
-- Reverse-proxies `api.anthropic.com` with injected `Authorization: Bearer` header
-- Clients just point `ANTHROPIC_BASE_URL` at ccx — no per-device login needed
+- 集中管理 OAuth token
+- 过期前自动刷新（或在 401 时立即刷新）
+- 反向代理 `api.anthropic.com`，自动注入 `Authorization: Bearer` 头
+- 客户端只需指向 ccx，无需逐台设备登录
 
-## Client setup
+## 客户端配置
 
-On each device:
+在每台设备上：
 
 ```bash
 export ANTHROPIC_BASE_URL=http://<ccx-host>:8300
-export CLAUDE_CODE_OAUTH_TOKEN=dummy  # bypass local login
+export CLAUDE_CODE_OAUTH_TOKEN=dummy  # 跳过本地登录
 ```
 
-## Security
+## 安全提示
 
-- Only run ccx on a trusted network (LAN / Tailscale)
-- Never expose to the public internet
-- Refresh tokens are long-lived — treat them like passwords
+- 仅在可信网络（LAN / Tailscale）上运行 ccx
+- 切勿暴露到公网
+- Refresh token 是长期有效的凭证，视同密码处理
 
-## License
+## 许可证
 
 MIT

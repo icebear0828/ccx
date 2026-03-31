@@ -1,86 +1,88 @@
-# Risk Analysis — Account Ban Factors
+# 风险分析 — 封号因素
 
-> Understanding what triggers account restrictions when proxying Claude Code OAuth tokens.
+[English](./docs/en/RISK.md)
 
-## Core Issue
+> 梳理代理 Claude Code OAuth token 时可能触发账户封禁的因素。
 
-Claude Pro/Max is a per-seat subscription. A proxy that shares one account across multiple devices (or users) fundamentally conflicts with the Terms of Service. Everything below is a detection vector for this behavior.
+## 核心问题
 
----
-
-## High Risk
-
-### 1. Concurrent Requests from Multiple IPs
-
-The upstream server sees a single OAuth token issuing requests from different source IPs simultaneously. This is the most obvious signal of token sharing and is trivial to detect server-side.
-
-**Mitigation:** Route ALL traffic through the proxy's single egress IP. Never let clients call `api.anthropic.com` directly.
-
-### 2. Token Sharing Violates ToS
-
-Regardless of technical detection, sharing a subscription seat across devices/users is a policy violation. If Anthropic reviews the account for any reason, the usage pattern speaks for itself.
-
-**Mitigation:** None — this is an inherent risk of the architecture.
-
-### 3. Refresh Token Storm
-
-When multiple clients hit 401 simultaneously, naive implementations will fire multiple refresh requests in parallel. A burst of `grant_type=refresh_token` calls in a short window is abnormal and triggers rate limiting or fraud detection.
-
-**Mitigation:** Implement a refresh lock — only one refresh request at a time. Queue other callers until the refresh completes.
+Claude Pro/Max 是按席位计费的订阅。通过代理让多台设备（或多人）共用一个账户，本质上违反服务条款。以下是该行为的各种检测维度。
 
 ---
 
-## Medium Risk
+## 高风险
 
-### 4. Abnormal Request Volume
+### 1. 多 IP 并发请求
 
-Even within the `rateLimitTier` hard limits, sustained high-frequency usage (aggregated from multiple devices) can exceed what a single human reasonably produces. Soft limits and manual reviews catch this.
+上游服务器看到同一个 OAuth token 同时从不同源 IP 发起请求。这是 token 共享最明显的信号，服务端检测成本极低。
 
-**Mitigation:** Add a rate limiter at the proxy layer. Keep aggregate throughput within single-user norms.
+**缓解：** 所有流量通过代理的单一出口 IP。客户端永远不要直连 `api.anthropic.com`。
 
-### 5. IP Geolocation Jumps
+### 2. Token 共享本身违反 ToS
 
-If clients are on different networks (home LAN, office, cloud server), the same token appears from geographically distant IPs within short intervals — similar to "impossible travel" detection used in fraud systems.
+不论技术上是否被检测到，跨设备/跨用户共享订阅席位就是违规行为。一旦账户被人工审查，使用模式本身就是证据。
 
-**Mitigation:** All traffic through the proxy (single egress). If clients are remote, use a VPN/Tailscale tunnel back to the proxy rather than forwarding tokens.
+**缓解：** 无 — 这是该架构的固有风险。
 
-### 6. Inconsistent Client Fingerprints
+### 3. Token 刷新风暴
 
-Different devices send different `User-Agent` strings, OS identifiers, and Claude Code versions. A single account rapidly alternating between `darwin/arm64` and `linux/x86_64` is suspicious.
+当多个客户端同时遇到 401，朴素实现会并行发出多个 refresh 请求。短时间内大量 `grant_type=refresh_token` 调用是异常行为，会触发风控或欺诈检测。
 
-**Mitigation:** Have the proxy normalize outbound headers — rewrite `User-Agent` and strip or unify client-identifying headers.
-
----
-
-## Low Risk
-
-### 7. Unusual Session Patterns
-
-Claude Code creates sessions (`user:sessions:claude_code` scope). Multiple overlapping sessions with different characteristics (different working directories, simultaneous tool calls) may be flagged.
-
-### 8. Token Lifetime Anomalies
-
-If the proxy aggressively refreshes tokens well before expiry (e.g., every hour when TTL is 24h), the refresh pattern deviates from the official client's behavior.
-
-**Mitigation:** Mirror the official client's refresh strategy — refresh at ~50-75% of TTL or on 401, not eagerly.
-
-### 9. Missing Telemetry
-
-Claude Code sends metrics to `/api/claude_code/metrics` and feedback to `/api/claude_cli_feedback`. If the proxy blocks or doesn't forward these, the account shows API usage with zero telemetry — a gap that could flag automated/proxy usage.
-
-**Mitigation:** Pass telemetry requests through transparently.
+**缓解：** 实现 refresh 互斥锁 — 同一时刻只允许一个 refresh 请求，其他调用方排队等待。
 
 ---
 
-## Summary: Defense in Depth
+## 中风险
 
-| Layer | Action |
-|-------|--------|
-| Network | Single egress IP, all traffic through proxy |
-| Headers | Normalize User-Agent and client fingerprints |
-| Refresh | Mutex lock, one refresh at a time |
-| Rate | Limit aggregate requests to single-user norms |
-| Telemetry | Forward all metrics/feedback transparently |
-| Behavior | Avoid true parallel requests from multiple clients |
+### 4. 异常请求量
 
-The safest configuration: all devices on the same LAN (or Tailscale network), proxy as the sole egress point, with request queuing to serialize upstream calls.
+即使未超过 `rateLimitTier` 硬限制，多台设备叠加的持续高频使用也可能超出单人合理产出。软限制和人工审查会捕捉到这一点。
+
+**缓解：** 在代理层添加限流器，将聚合吞吐量控制在单用户正常范围内。
+
+### 5. IP 地理位置跳变
+
+如果客户端分布在不同网络（家庭局域网、办公室、云服务器），同一 token 在短时间内从地理位置相距甚远的 IP 出现 — 类似欺诈系统中的"不可能旅行"检测。
+
+**缓解：** 所有流量通过代理（单一出口）。远程客户端使用 VPN/Tailscale 隧道回连代理，而非转发 token。
+
+### 6. 客户端指纹不一致
+
+不同设备发送不同的 `User-Agent`、操作系统标识和 Claude Code 版本。同一账户在 `darwin/arm64` 和 `linux/x86_64` 之间快速切换会引起怀疑。
+
+**缓解：** 代理统一重写出站头部 — 标准化 `User-Agent`，剥离或统一客户端标识头。
+
+---
+
+## 低风险
+
+### 7. 异常会话模式
+
+Claude Code 会创建会话（`user:sessions:claude_code` 作用域）。多个特征不同的重叠会话（不同工作目录、同时的工具调用）可能被标记。
+
+### 8. Token 生命周期异常
+
+如果代理在过期前很久就激进刷新 token（例如 TTL 24 小时却每小时刷新），刷新模式会偏离官方客户端的行为。
+
+**缓解：** 模仿官方客户端的刷新策略 — 在 TTL 的 50-75% 时或遇到 401 时刷新，而非提前刷新。
+
+### 9. 缺失遥测数据
+
+Claude Code 会向 `/api/claude_code/metrics` 发送指标，向 `/api/claude_cli_feedback` 发送反馈。如果代理阻断或不转发这些请求，账户会呈现有 API 使用但零遥测的状态 — 这个缺口可能标记自动化/代理使用。
+
+**缓解：** 透明转发遥测请求。
+
+---
+
+## 总结：纵深防御
+
+| 层面 | 措施 |
+|------|------|
+| 网络 | 单一出口 IP，所有流量通过代理 |
+| 头部 | 标准化 User-Agent 和客户端指纹 |
+| 刷新 | 互斥锁，同一时刻只允许一个刷新请求 |
+| 限流 | 将聚合请求量限制在单用户正常范围内 |
+| 遥测 | 透明转发所有指标/反馈 |
+| 行为 | 避免多客户端真正并行请求上游 |
+
+最安全的配置：所有设备在同一局域网（或 Tailscale 网络），代理作为唯一出口，并通过请求排队串行化上游调用。
