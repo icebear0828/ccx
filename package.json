@@ -1,0 +1,18 @@
+{
+  "name": "ccx",
+  "version": "0.1.0",
+  "description": "Claude Code Exchange — OAuth proxy for sharing Claude Code across devices",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/icebear0828/ccx.git"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "oauth",
+    "proxy",
+    "token-refresh"
+  ]
+}
